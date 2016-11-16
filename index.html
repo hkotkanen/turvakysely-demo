@@ -1,7 +1,127 @@
 <html>
 <head>
+    <script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+    <script src="https://dev.hel.fi/~kotkanen/lib/Leaflet.helsinki-tiles.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/css/dvf.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/leaflet-dvf.js"></script>
 </head>
 <body>
-This is the demo
+<p>This is the demo</p>
+<div id="map" style="width:100%; height:500px;" />
+<script>
+const years = ['2015', '2012', '2009', '2006']
+
+// hard coded to fit the safe_by_year.json data format
+function object_to_cols(ob) {
+    var keys = []
+    var vals_safe = []
+    var vals_unsafe = []
+    for (var year in ob) {
+        keys.push(year)
+        vals_safe.push(ob[year].safe)
+        vals_unsafe.push(ob[year].unsafe)
+    }
+    return {year: keys, safe: vals_safe, unsafe: vals_unsafe}
+}
+
+// hard coded to fit the safe_by_year.json data format
+function find_min_max(ob) {
+    var min = 100
+    var max = 0
+    for (var area in ob) {
+        // console.log(ob[area])
+        for (var year in ob[area]) {
+            // console.log(ob[area][year].unsafe)
+            if (ob[area][year].unsafe < min) {
+                min = ob[area][year].unsafe
+            }
+            if (ob[area][year].unsafe > max) {
+                max = ob[area][year].unsafe
+            }
+        }
+    }
+    return {min: min, max:max}
+}
+
+function remove_datalayers() {
+    for (var layer in window.layerGroups){
+        map.removeLayer(window.layerGroups[layer])
+    }
+}
+
+function value_to_color(min_value, max_value) {
+    return new L.HSLHueFunction(
+			new L.Point(min_value,120),
+			new L.Point(max_value,0))
+
+    // https://github.com/humangeo/leaflet-dvf/blob/master/examples/js/colors.js
+    // return new L.PiecewiseFunction([new L.HSLLuminosityFunction([min_value,1], [20,0.5], {outputHue: 60}), new L.HSLHueFunction([20,60], [max_value, 0])])
+}
+
+// load safety data, find min and max values and create color interpolator
+$.getJSON("data/safe_by_year.json")
+    .done(function(data) {
+        window.safe_data = data.data
+        var bounds = find_min_max(data.data)
+        window.color_interpolator = value_to_color(bounds.min, bounds.max)
+        // console.log(window.color_interpolator.evaluate(30))
+    })
+
+// get area geometries, inject safety data into geojson array and store it as the global "area_data"
+var area_data = {}
+var geoms = []
+var geometry_promise = $.getJSON("http://api.hel.fi/servicemap/v1/administrative_division/?type=3&page_size=100&geometry=True")
+    .done(function(data) {
+        data.results.map(function(area) {
+            area.properties = {}
+            area.properties.safety = safe_data[area.origin_id]
+            area.properties.safety_cols = object_to_cols(area.properties.safety)
+            area_data[area.origin_id] = area
+            area.type = "Feature"
+            area.geometry = area.boundary
+            geoms.push(area)
+        })
+        console.log("area geometry loaded and data injected")
+    })
+
+var map = L.map.Helsinki("map", {background: "servicemap"})
+map.setZoom(8)
+var legendControl = new L.Control.Legend()
+legendControl.addTo(map)
+
+window.layerGroups = {}
+
+// wait on the areas being loaded again
+geometry_promise.done(function() {
+    // make a layergroup for each year to hold all the colored areas
+    for (var year in years) {
+        year = years[year]
+        var year_layer = L.geoJSON(geoms, {
+            style: function(feat) {
+                var year_i = feat.properties.safety_cols.year.findIndex(function(elem){return elem===year})
+                var color = color_interpolator.evaluate(feat.properties.safety_cols.unsafe[year_i])
+                return {
+                    fillColor: color,
+                    color: color,
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.7,
+                    dashArray: '3'
+                }
+            }
+        })
+        window.layerGroups[year] = L.layerGroup().addLayer(year_layer)
+    }
+
+    window.layerGroups['2015'].addTo(map)
+    // setTimeout(remove_datalayers, 3000)
+    // setTimeout(function() {window.layerGroups['2012'].addTo(map)}, 3000)
+    // setTimeout(remove_datalayers, 6000)
+    // setTimeout(function() {window.layerGroups['2009'].addTo(map)}, 6000)
+    // setTimeout(remove_datalayers, 9000)
+    // setTimeout(function() {window.layerGroups['2006'].addTo(map)}, 9000)
+})
+
+</script>
 </body>
 </html
