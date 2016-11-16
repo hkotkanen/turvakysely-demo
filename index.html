@@ -70,7 +70,7 @@ $.getJSON("data/safe_by_year.json")
 // get area geometries, inject safety data into geojson array and store it as the global "area_data"
 var area_data = {}
 var geoms = []
-var geometry_promise = $.getJSON("http://api.hel.fi/servicemap/v1/administrative_division/?type=3&page_size=100&geometry=True")
+var geometry_promise = $.getJSON("https://api.hel.fi/servicemap/v1/administrative_division/?type=3&page_size=100&geometry=True")
     .done(function(data) {
         data.results.map(function(area) {
             area.properties = {}
