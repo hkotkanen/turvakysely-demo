@@ -274,7 +274,12 @@ geometry_promise.done(function() {
         x: window.options.years,
         y: window.options.city_avg_unsafe,
         mode: 'lines+markers',
-        name: 'Helsinki keskiarvo'
+        name: 'Helsinki keskiarvo',
+        line: {
+            color: 'black',
+            width: 4,
+            dash: 'dashdot'
+        }
     }
 
     var data = [city_data]
