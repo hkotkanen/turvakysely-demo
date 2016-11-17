@@ -1,11 +1,14 @@
 <html>
 <head>
+    <meta charset="UTF-8">
     <script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
     <script src="https://dev.hel.fi/~kotkanen/lib/Leaflet.helsinki-tiles.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/css/dvf.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/leaflet-dvf.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.2/lodash.min.js"></script>
     <style type="text/css">
-    .info {
+    .info, .yearsel {
         padding: 6px 8px;
         font: 14px/16px Arial, Helvetica, sans-serif;
         background: white;
@@ -17,11 +20,38 @@
         margin: 0 0 5px;
         color: #777;
     }
+
+    .legend {
+        line-height: 18px;
+        color: #555;
+    }
+    .legend i {
+        width: 18px;
+        height: 18px;
+        float: left;
+        margin-right: 8px;
+        opacity: 0.7;
+    }
+    #container {
+        width: 100%;
+        height: 100%;
+    }
+    #map {
+        width: 100%;
+        height: 70%;
+    }
+    #plot {
+        width: 100%;
+        height: 30%;
+    }
     </style>
 </head>
 <body>
-<p>This is the demo</p>
-<div id="map" style="width:100%; height:500px;" />
+<div id="container">
+    <div id="map"></div>
+    <br>
+    <div id="plot"></div>
+</div>
 <script>
 window.options = {}
 window.options.years = ['2015', '2012', '2009', '2006']
@@ -66,7 +96,9 @@ function remove_datalayers() {
     for (var layer in window.options.year_layers){
         map.removeLayer(window.options.year_layers[layer])
     }
-    info.update()
+    if (typeof(info) == 'object') {
+        info.update()
+    }
 }
 
 function highlight_feature(e) {
@@ -99,6 +131,13 @@ function clickFeature(e) {
     console.log(e)
 }
 
+function change_year_overlay(year) {
+    remove_datalayers()
+    window.options.year_layers[year].addTo(map)
+    window.options.currentlayer = window.options.year_layers[year]
+    window.options.currentyear = year
+}
+
 function on_each_feature(feature, layer) {
     layer.on({
         mouseover: highlight_feature,
@@ -117,12 +156,12 @@ function value_to_color(min_value, max_value) {
 }
 
 // load safety data, find min and max values and create color interpolator
-$.getJSON("data/safe_by_year.json")
+var data_promise = $.getJSON("data/safe_by_year.json")
     .done(function(data) {
         window.options.safe_data = data.data
         var bounds = find_min_max(data.data)
-        window.color_interpolator = value_to_color(bounds.min, bounds.max)
-        // console.log(window.color_interpolator.evaluate(30))
+        window.options.color_interpolator = value_to_color(bounds.min, bounds.max)
+        // console.log(window.options.polator.evaluate(30))
     })
 
 // get area geometries, inject safety data into geojson array and store it as the global "area_data"
@@ -140,24 +179,29 @@ var geometry_promise = $.getJSON("https://api.hel.fi/servicemap/v1/administrativ
         console.log("area geometry loaded and data injected")
     })
 
-// SET UP MAP AND INFO AND LEGEND
+// SET UP MAP
 var map = L.map.Helsinki("map", {background: "servicemap"})
 map.setZoom(8)
-// var legendControl = new L.Control.Legend()
-// legendControl.addTo(map)
-var info = L.control();
-info.onAdd = function (map) {
-    this._div = L.DomUtil.create('div', 'info'); // create a div with a class "info"
-    this.update();
-    return this._div;
-}
-// method that we will use to update the control based on feature properties passed
-info.update = function (props) {
-    this._div.innerHTML = '<h4>Turvattomuuden kokijoita vuonna ' + (window.options.currentyear) + '</h4>' +  (props ?
-        '<b>' + props.name.fi + '</b><br />' + props.properties.safety[window.options.currentyear].unsafe + ' %'
-        : 'Siirrä hiiri peruspiirin päälle');
-}
-info.addTo(map)
+
+// LEGEND
+data_promise.done(function(data) {
+    var legend = L.control({position: 'bottomright'})
+    var bounds = find_min_max(data.data)
+    legend.onAdd = function (map) {
+        var div = L.DomUtil.create('div', 'info legend'),
+            grades = _.range(bounds.min, bounds.max, 5)
+            labels = []
+        // loop through our density intervals and generate a label with a colored square for each interval
+        for (var i = 0; i < grades.length; i++) {
+            div.innerHTML +=
+                '<i style="background:' + window.options.color_interpolator.evaluate(grades[i] + 1) + '"></i> ' +
+                grades[i] + (grades[i + 1] ? '&ndash;' + grades[i + 1] + '<br>' : '+')
+        }
+        return div
+    }
+    legend.addTo(map)
+})
+
 
 // wait on the areas being loaded again and stored as a global
 // then construct yearly layer groups
@@ -168,7 +212,7 @@ geometry_promise.done(function() {
         var year_layer = L.geoJSON(window.options.geoms, {
             style: function(feat) {
                 var year_i = feat.properties.safety_cols.year.findIndex(function(elem){return elem===year})
-                var color = color_interpolator.evaluate(feat.properties.safety_cols.unsafe[year_i])
+                var color = window.options.color_interpolator.evaluate(feat.properties.safety_cols.unsafe[year_i])
                 return {
                     fillColor: color,
                     color: 'white',
@@ -183,17 +227,47 @@ geometry_promise.done(function() {
         window.options.year_layers[year] = L.layerGroup().addLayer(year_layer)
     }
 
-    window.options.year_layers['2015'].addTo(map)
-    window.options.currentlayer = window.options.year_layers['2015']
-    window.options.currentyear = '2015'
-    // setTimeout(remove_datalayers, 3000)
-    // setTimeout(function() {window.options.year_layers['2012'].addTo(map)}, 3000)
-    // setTimeout(function () {window.options.currentyear = '2012'}, 3000)
-    // setTimeout(remove_datalayers, 6000)
-    // setTimeout(function() {window.year_layers['2009'].addTo(map)}, 6000)
-    // setTimeout(remove_datalayers, 9000)
-    // setTimeout(function() {window.year_layers['2006'].addTo(map)}, 9000)
+    // YEAR SELECT
+    var yearsel = L.control()
+    yearsel.onAdd = function (map) {
+        this._div = L.DomUtil.create('div', 'yearsel')
+        for (var year in window.options.years) {
+            console.log(window.options.years[year]=="2015" ? "true" : "false")
+            this._div.innerHTML += "<label><input id='" + "select-" + window.options.years[year] + "' type='radio' name='yearselect' value='" + window.options.years[year] + "'/>" + window.options.years[year] + "</label>"
+        }
+        return this._div
+    }
+    yearsel.addTo(map)
+    $("input").change(function(event) {
+        change_year_overlay(event.target.value)
+    })
+    $("input[value=2015]").prop("checked", true).change()
+
+
+    // INFO
+    var info = L.control()
+    info.onAdd = function (map) {
+        this._div = L.DomUtil.create('div', 'info'); // create a div with a class "info"
+        this.update()
+        return this._div
+    }
+    // method that we will use to update the control based on feature properties passed
+    info.update = function (props) {
+        this._div.innerHTML = '<h4>Turvattomuuden kokijoita vuonna ' + (window.options.currentyear) + '</h4>' +
+            (props ? '<b>' + props.name.fi + '</b><br />' + props.properties.safety[window.options.currentyear].unsafe.toFixed(2) + ' %'
+            : 'Siirrä hiiri peruspiirin päälle')
+    }
+    info.addTo(map)
+    window.info = info
 })
+
+//PLOT
+plot = document.getElementById('plot');
+
+Plotly.plot( plot, [{
+    x: [1, 2, 3, 4, 5],
+    y: [1, 2, 4, 8, 16] }], {
+    margin: { t: 0 } } )
 
 </script>
 </body>
