@@ -85,4 +85,4 @@ with open('data/by_year.json', 'r') as jsonfile:
             d[area][year] = year_ob
 
     with open('data/safe_by_year.json', 'w') as finalout:
-        json.dump({'data':d}, finalout, ensure_ascii=False, encoding='utf-8')
+        json.dump({'data':d}, finalout, ensure_ascii=False, encoding='utf-8', indent=4)

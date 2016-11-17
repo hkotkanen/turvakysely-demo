@@ -38,7 +38,7 @@
     }
     #map {
         width: 100%;
-        height: 70%;
+        height: 60%;
     }
     #plot {
         width: 100%;
@@ -55,10 +55,12 @@
 <script>
 window.options = {}
 window.options.years = ['2015', '2012', '2009', '2006']
+window.options.city_avg_unsafe = [16.23, 16.0, 17.06, 17.97]
 window.options.currentlayer = null
 window.options.year_layers = {}
 window.options.area_data = {}
 window.options.geoms = []
+window.options.traces = {}
 
 // hard coded to fit the safe_by_year.json data format
 function object_to_cols(ob) {
@@ -128,7 +130,12 @@ function reset_hightlight(e) {
 }
 
 function clickFeature(e) {
-    console.log(e)
+    var layer = e.target
+    var plotDiv = document.getElementById('plot');
+    var plotData = plotDiv.data
+    // console.log(window.options.plot)
+    plotData.push(window.options.traces[layer.feature.origin_id])
+    Plotly.redraw(plotDiv)
 }
 
 function change_year_overlay(year) {
@@ -161,7 +168,6 @@ var data_promise = $.getJSON("data/safe_by_year.json")
         window.options.safe_data = data.data
         var bounds = find_min_max(data.data)
         window.options.color_interpolator = value_to_color(bounds.min, bounds.max)
-        // console.log(window.options.polator.evaluate(30))
     })
 
 // get area geometries, inject safety data into geojson array and store it as the global "area_data"
@@ -232,7 +238,6 @@ geometry_promise.done(function() {
     yearsel.onAdd = function (map) {
         this._div = L.DomUtil.create('div', 'yearsel')
         for (var year in window.options.years) {
-            console.log(window.options.years[year]=="2015" ? "true" : "false")
             this._div.innerHTML += "<label><input id='" + "select-" + window.options.years[year] + "' type='radio' name='yearselect' value='" + window.options.years[year] + "'/>" + window.options.years[year] + "</label>"
         }
         return this._div
@@ -262,13 +267,39 @@ geometry_promise.done(function() {
 })
 
 //PLOT
-plot = document.getElementById('plot');
+geometry_promise.done(function() {
+    plot = document.getElementById('plot');
 
-Plotly.plot( plot, [{
-    x: [1, 2, 3, 4, 5],
-    y: [1, 2, 4, 8, 16] }], {
-    margin: { t: 0 } } )
+    var city_data = {
+        x: window.options.years,
+        y: window.options.city_avg_unsafe,
+        mode: 'lines+markers',
+        name: 'Helsinki keskiarvo'
+    }
 
+    var data = [city_data]
+
+    _.map(window.options.area_data, function(elem) {
+        var area_trace = {
+            x: elem.properties.safety_cols.year,
+            y: elem.properties.safety_cols.unsafe,
+            mode: 'lines+markers',
+            name: elem.name.fi
+        }
+        window.options.traces[elem.origin_id] = area_trace
+        // data.push(area_trace)
+    })
+
+    var layout = {
+        title: 'Turvattomuutta viikonloppuiltaisin tuntevien osuus',
+        xaxis: {
+            title: 'vuosi'
+        },
+        showlegend: true
+    }
+
+    Plotly.newPlot('plot', data, layout)
+})
 </script>
 </body>
 </html
