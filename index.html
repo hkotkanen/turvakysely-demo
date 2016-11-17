@@ -4,12 +4,31 @@
     <script src="https://dev.hel.fi/~kotkanen/lib/Leaflet.helsinki-tiles.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/css/dvf.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-dvf/0.3.0/leaflet-dvf.js"></script>
+    <style type="text/css">
+    .info {
+        padding: 6px 8px;
+        font: 14px/16px Arial, Helvetica, sans-serif;
+        background: white;
+        background: rgba(255,255,255,0.8);
+        box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        border-radius: 5px;
+    }
+    .info h4 {
+        margin: 0 0 5px;
+        color: #777;
+    }
+    </style>
 </head>
 <body>
 <p>This is the demo</p>
 <div id="map" style="width:100%; height:500px;" />
 <script>
-const years = ['2015', '2012', '2009', '2006']
+window.options = {}
+window.options.years = ['2015', '2012', '2009', '2006']
+window.options.currentlayer = null
+window.options.year_layers = {}
+window.options.area_data = {}
+window.options.geoms = []
 
 // hard coded to fit the safe_by_year.json data format
 function object_to_cols(ob) {
@@ -44,9 +63,48 @@ function find_min_max(ob) {
 }
 
 function remove_datalayers() {
-    for (var layer in window.layerGroups){
-        map.removeLayer(window.layerGroups[layer])
+    for (var layer in window.options.year_layers){
+        map.removeLayer(window.options.year_layers[layer])
     }
+    info.update()
+}
+
+function highlight_feature(e) {
+    var layer = e.target
+    layer.setStyle({
+        weight: 5,
+        color: '#666',
+        dashArray: '',
+        fillOpacity: 0.7
+    })
+
+    if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+        layer.bringToFront();
+    }
+    info.update(layer.feature)
+}
+
+function reset_hightlight(e) {
+    // window.options.currentlayer && window.options.currentlayer.resetStyle(e.target)
+    var layer = e.target
+    layer.setStyle({
+        color: 'white',
+        weight: 2,
+        dashArray: '3'
+    })
+    info.update()
+}
+
+function clickFeature(e) {
+    console.log(e)
+}
+
+function on_each_feature(feature, layer) {
+    layer.on({
+        mouseover: highlight_feature,
+        mouseout: reset_hightlight,
+        click: clickFeature
+    })
 }
 
 function value_to_color(min_value, max_value) {
@@ -61,65 +119,80 @@ function value_to_color(min_value, max_value) {
 // load safety data, find min and max values and create color interpolator
 $.getJSON("data/safe_by_year.json")
     .done(function(data) {
-        window.safe_data = data.data
+        window.options.safe_data = data.data
         var bounds = find_min_max(data.data)
         window.color_interpolator = value_to_color(bounds.min, bounds.max)
         // console.log(window.color_interpolator.evaluate(30))
     })
 
 // get area geometries, inject safety data into geojson array and store it as the global "area_data"
-var area_data = {}
-var geoms = []
 var geometry_promise = $.getJSON("https://api.hel.fi/servicemap/v1/administrative_division/?type=3&page_size=100&geometry=True")
     .done(function(data) {
         data.results.map(function(area) {
             area.properties = {}
-            area.properties.safety = safe_data[area.origin_id]
+            area.properties.safety = window.options.safe_data[area.origin_id]
             area.properties.safety_cols = object_to_cols(area.properties.safety)
-            area_data[area.origin_id] = area
+            window.options.area_data[area.origin_id] = area
             area.type = "Feature"
             area.geometry = area.boundary
-            geoms.push(area)
+            window.options.geoms.push(area)
         })
         console.log("area geometry loaded and data injected")
     })
 
+// SET UP MAP AND INFO AND LEGEND
 var map = L.map.Helsinki("map", {background: "servicemap"})
 map.setZoom(8)
-var legendControl = new L.Control.Legend()
-legendControl.addTo(map)
+// var legendControl = new L.Control.Legend()
+// legendControl.addTo(map)
+var info = L.control();
+info.onAdd = function (map) {
+    this._div = L.DomUtil.create('div', 'info'); // create a div with a class "info"
+    this.update();
+    return this._div;
+}
+// method that we will use to update the control based on feature properties passed
+info.update = function (props) {
+    this._div.innerHTML = '<h4>Turvattomuuden kokijoita vuonna ' + (window.options.currentyear) + '</h4>' +  (props ?
+        '<b>' + props.name.fi + '</b><br />' + props.properties.safety[window.options.currentyear].unsafe + ' %'
+        : 'Siirrä hiiri peruspiirin päälle');
+}
+info.addTo(map)
 
-window.layerGroups = {}
-
-// wait on the areas being loaded again
+// wait on the areas being loaded again and stored as a global
+// then construct yearly layer groups
 geometry_promise.done(function() {
     // make a layergroup for each year to hold all the colored areas
-    for (var year in years) {
-        year = years[year]
-        var year_layer = L.geoJSON(geoms, {
+    for (var year in window.options.years) {
+        year = window.options.years[year]
+        var year_layer = L.geoJSON(window.options.geoms, {
             style: function(feat) {
                 var year_i = feat.properties.safety_cols.year.findIndex(function(elem){return elem===year})
                 var color = color_interpolator.evaluate(feat.properties.safety_cols.unsafe[year_i])
                 return {
                     fillColor: color,
-                    color: color,
+                    color: 'white',
                     weight: 2,
                     opacity: 1,
                     fillOpacity: 0.7,
                     dashArray: '3'
                 }
-            }
+            },
+            onEachFeature: on_each_feature
         })
-        window.layerGroups[year] = L.layerGroup().addLayer(year_layer)
+        window.options.year_layers[year] = L.layerGroup().addLayer(year_layer)
     }
 
-    window.layerGroups['2015'].addTo(map)
+    window.options.year_layers['2015'].addTo(map)
+    window.options.currentlayer = window.options.year_layers['2015']
+    window.options.currentyear = '2015'
     // setTimeout(remove_datalayers, 3000)
-    // setTimeout(function() {window.layerGroups['2012'].addTo(map)}, 3000)
+    // setTimeout(function() {window.options.year_layers['2012'].addTo(map)}, 3000)
+    // setTimeout(function () {window.options.currentyear = '2012'}, 3000)
     // setTimeout(remove_datalayers, 6000)
-    // setTimeout(function() {window.layerGroups['2009'].addTo(map)}, 6000)
+    // setTimeout(function() {window.year_layers['2009'].addTo(map)}, 6000)
     // setTimeout(remove_datalayers, 9000)
-    // setTimeout(function() {window.layerGroups['2006'].addTo(map)}, 9000)
+    // setTimeout(function() {window.year_layers['2006'].addTo(map)}, 9000)
 })
 
 </script>
